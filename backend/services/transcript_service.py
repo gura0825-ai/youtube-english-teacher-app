@@ -28,11 +28,18 @@ def _cookies_file() -> str | None:
     """Write YOUTUBE_COOKIES_B64 env var to a temp file and return its path."""
     b64 = os.environ.get("YOUTUBE_COOKIES_B64")
     if not b64:
+        print("[transcript] YOUTUBE_COOKIES_B64 not set — proceeding without cookies")
         return None
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="wb")
-    tmp.write(base64.b64decode(b64))
-    tmp.close()
-    return tmp.name
+    try:
+        decoded = base64.b64decode(b64)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="wb")
+        tmp.write(decoded)
+        tmp.close()
+        print(f"[transcript] cookies loaded ({len(decoded)} bytes) → {tmp.name}")
+        return tmp.name
+    except Exception as e:
+        print(f"[transcript] failed to decode cookies: {e}")
+        return None
 
 
 def _ydl_opts(extra: dict | None = None) -> dict:
