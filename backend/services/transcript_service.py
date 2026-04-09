@@ -1,8 +1,7 @@
 import re
+import json
 import requests
-
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
+import yt_dlp
 
 MAX_TRANSCRIPT_CHARS = 150_000  # ~37,500 tokens — stays within Claude's context window
 
@@ -23,65 +22,132 @@ def extract_video_id(url: str) -> str | None:
 
 
 def get_video_title(video_id: str) -> str:
-    """Fetch video title by parsing the YouTube page HTML. Falls back to video_id."""
+    """Fetch video title via yt-dlp. Falls back to video_id."""
     try:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
         }
-        resp = requests.get(url, headers=headers, timeout=5)
-        resp.raise_for_status()
-
-        # Try <title> tag first
-        match = re.search(r"<title>(.+?) - YouTube</title>", resp.text)
-        if match:
-            return match.group(1)
-
-        # Fallback: JSON data embedded in page
-        match = re.search(r'"title":"([^"]{1,200})"', resp.text)
-        if match:
-            return match.group(1)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/watch?v={video_id}",
+                download=False,
+            )
+            return info.get('title') or video_id
     except Exception:
         pass
-
     return video_id
 
 
 def get_transcript(video_id: str) -> str:
     """
-    Fetch English transcript for the given video_id.
-    Priority: en → en-US → any auto-generated.
+    Fetch English transcript for the given video_id using yt-dlp.
+    Priority: manual en/en-US → auto-generated en/en-US.
     Raises ValueError if no transcript is available.
     """
-    try:
-        api = YouTubeTranscriptApi()
-        transcript_list = api.list(video_id)
+    url = f"https://www.youtube.com/watch?v={video_id}"
 
-        # Try manual English transcripts first, then auto-generated
-        try:
-            transcript = transcript_list.find_transcript(["en", "en-US"])
-        except NoTranscriptFound:
-            transcript = transcript_list.find_generated_transcript(["en", "en-US"])
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True,
+        'writesubtitles': False,
+        'writeautomaticsub': False,
+    }
 
-        snippets = transcript.fetch()
-        parts = []
-        for snippet in snippets:
-            # Handle both dict (old API) and object (new API ≥0.6) formats
-            if isinstance(snippet, dict):
-                parts.append(snippet.get("text", ""))
-            else:
-                parts.append(getattr(snippet, "text", ""))
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
 
-        text = " ".join(p for p in parts if p)
+    subtitles = info.get('subtitles') or {}
+    automatic_captions = info.get('automatic_captions') or {}
 
-        if len(text) > MAX_TRANSCRIPT_CHARS:
-            text = text[:MAX_TRANSCRIPT_CHARS] + "\n\n[Transcript truncated due to length]"
+    # Try manual subtitles first, then auto-generated
+    lang_candidates = ['en', 'en-US', 'en-GB']
+    subtitle_data = None
+    for lang in lang_candidates:
+        if lang in subtitles:
+            subtitle_data = subtitles[lang]
+            break
+    if subtitle_data is None:
+        for lang in lang_candidates:
+            if lang in automatic_captions:
+                subtitle_data = automatic_captions[lang]
+                break
 
-        return text
+    if not subtitle_data:
+        raise ValueError("No subtitles available for this video")
 
-    except (NoTranscriptFound, TranscriptsDisabled) as e:
-        raise ValueError("No subtitles available for this video") from e
+    # Prefer json3 format, fall back to ttml/vtt
+    fmt_priority = ['json3', 'ttml', 'vtt', 'srv3', 'srv2', 'srv1']
+    chosen = None
+    for fmt in fmt_priority:
+        for entry in subtitle_data:
+            if entry.get('ext') == fmt:
+                chosen = entry
+                break
+        if chosen:
+            break
+    if not chosen:
+        chosen = subtitle_data[0]
+
+    sub_url = chosen.get('url')
+    if not sub_url:
+        raise ValueError("No subtitle URL found")
+
+    resp = requests.get(sub_url, timeout=15)
+    resp.raise_for_status()
+
+    ext = chosen.get('ext', '')
+    if ext == 'json3':
+        text = _parse_json3(resp.text)
+    elif ext in ('ttml', 'xml'):
+        text = _parse_ttml(resp.text)
+    else:
+        text = _parse_vtt(resp.text)
+
+    if not text.strip():
+        raise ValueError("Transcript is empty")
+
+    if len(text) > MAX_TRANSCRIPT_CHARS:
+        text = text[:MAX_TRANSCRIPT_CHARS] + "\n\n[Transcript truncated due to length]"
+
+    return text
+
+
+def _parse_json3(raw: str) -> str:
+    data = json.loads(raw)
+    parts = []
+    for event in data.get('events', []):
+        segs = event.get('segs')
+        if not segs:
+            continue
+        line = ''.join(s.get('utf8', '') for s in segs).replace('\n', ' ').strip()
+        if line and line != ' ':
+            parts.append(line)
+    return ' '.join(parts)
+
+
+def _parse_ttml(raw: str) -> str:
+    # Strip XML tags, collapse whitespace
+    text = re.sub(r'<[^>]+>', ' ', raw)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
+def _parse_vtt(raw: str) -> str:
+    lines = raw.splitlines()
+    parts = []
+    for line in lines:
+        # Skip WEBVTT header, cue timestamps, NOTE lines, and empty lines
+        if (line.startswith('WEBVTT') or
+                line.startswith('NOTE') or
+                re.match(r'^\d{2}:\d{2}', line) or
+                '-->' in line or
+                line.strip() == ''):
+            continue
+        # Strip inline tags like <00:00:01.000><c>text</c>
+        clean = re.sub(r'<[^>]+>', '', line).strip()
+        if clean:
+            parts.append(clean)
+    return ' '.join(parts)
