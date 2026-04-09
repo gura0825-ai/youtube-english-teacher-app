@@ -1,5 +1,8 @@
+import base64
+import os
 import re
 import json
+import tempfile
 import requests
 import yt_dlp
 
@@ -21,15 +24,35 @@ def extract_video_id(url: str) -> str | None:
     return None
 
 
+def _cookies_file() -> str | None:
+    """Write YOUTUBE_COOKIES_B64 env var to a temp file and return its path."""
+    b64 = os.environ.get("YOUTUBE_COOKIES_B64")
+    if not b64:
+        return None
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="wb")
+    tmp.write(base64.b64decode(b64))
+    tmp.close()
+    return tmp.name
+
+
+def _ydl_opts(extra: dict | None = None) -> dict:
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True,
+    }
+    cookies_path = _cookies_file()
+    if cookies_path:
+        opts['cookiefile'] = cookies_path
+    if extra:
+        opts.update(extra)
+    return opts
+
+
 def get_video_title(video_id: str) -> str:
     """Fetch video title via yt-dlp. Falls back to video_id."""
     try:
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'skip_download': True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
             info = ydl.extract_info(
                 f"https://www.youtube.com/watch?v={video_id}",
                 download=False,
@@ -48,21 +71,12 @@ def get_transcript(video_id: str) -> str:
     """
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-        'writesubtitles': False,
-        'writeautomaticsub': False,
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
         info = ydl.extract_info(url, download=False)
 
     subtitles = info.get('subtitles') or {}
     automatic_captions = info.get('automatic_captions') or {}
 
-    # Try manual subtitles first, then auto-generated
     lang_candidates = ['en', 'en-US', 'en-GB']
     subtitle_data = None
     for lang in lang_candidates:
@@ -78,7 +92,6 @@ def get_transcript(video_id: str) -> str:
     if not subtitle_data:
         raise ValueError("No subtitles available for this video")
 
-    # Prefer json3 format, fall back to ttml/vtt
     fmt_priority = ['json3', 'ttml', 'vtt', 'srv3', 'srv2', 'srv1']
     chosen = None
     for fmt in fmt_priority:
@@ -129,7 +142,6 @@ def _parse_json3(raw: str) -> str:
 
 
 def _parse_ttml(raw: str) -> str:
-    # Strip XML tags, collapse whitespace
     text = re.sub(r'<[^>]+>', ' ', raw)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
@@ -139,14 +151,12 @@ def _parse_vtt(raw: str) -> str:
     lines = raw.splitlines()
     parts = []
     for line in lines:
-        # Skip WEBVTT header, cue timestamps, NOTE lines, and empty lines
         if (line.startswith('WEBVTT') or
                 line.startswith('NOTE') or
                 re.match(r'^\d{2}:\d{2}', line) or
                 '-->' in line or
                 line.strip() == ''):
             continue
-        # Strip inline tags like <00:00:01.000><c>text</c>
         clean = re.sub(r'<[^>]+>', '', line).strip()
         if clean:
             parts.append(clean)
