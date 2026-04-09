@@ -47,6 +47,11 @@ def _ydl_opts(extra: dict | None = None) -> dict:
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+            }
+        },
     }
     cookies_path = _cookies_file()
     if cookies_path:
