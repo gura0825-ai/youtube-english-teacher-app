@@ -144,3 +144,4 @@ def get_transcript(video_id: str) -> dict:
         plain_text = plain_text[:MAX_TRANSCRIPT_CHARS] + "\n\n[Transcript truncated due to length]"
 
     return {"plain_text": plain_text, "segments": segments}
+
