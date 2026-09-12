@@ -313,19 +313,39 @@ body {
 }
 
 /* ── Transcript Panel ────────────────────────────────────── */
-.transcript-text {
-  font-size: 0.9rem;
-  line-height: 1.8;
-  color: var(--gray-600);
-  white-space: pre-wrap;
+.transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   max-height: 560px;
   overflow-y: auto;
   padding-right: 8px;
 }
 
-.transcript-text::-webkit-scrollbar { width: 6px; }
-.transcript-text::-webkit-scrollbar-track { background: var(--gray-100); border-radius: 3px; }
-.transcript-text::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
+.transcript-line {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+}
+
+.transcript-time {
+  flex-shrink: 0;
+  min-width: 46px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--blue);
+  font-variant-numeric: tabular-nums;
+}
+
+.transcript-line-text {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--gray-600);
+}
+
+.transcript-list::-webkit-scrollbar { width: 6px; }
+.transcript-list::-webkit-scrollbar-track { background: var(--gray-100); border-radius: 3px; }
+.transcript-list::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
 
 /* ── Summary Panel ───────────────────────────────────────── */
 .summary-section h3 {

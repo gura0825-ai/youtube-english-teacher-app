@@ -21,7 +21,9 @@ async def process_video(request: ProcessRequest):
 
     # STEP 2: Fetch transcript and title
     try:
-        transcript = transcript_service.get_transcript(video_id)
+        transcript_data = transcript_service.get_transcript(video_id)
+        plain_transcript = transcript_data["plain_text"]
+        segments = transcript_data["segments"]
         title = transcript_service.get_video_title(video_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -32,7 +34,7 @@ async def process_video(request: ProcessRequest):
 
     # STEP 3: Summary + Insights via Claude
     try:
-        summary_data = claude_service.get_summary_and_insights(transcript)
+        summary_data = claude_service.get_summary_and_insights(plain_transcript)
         summary = summary_data.get("summary", "")
         insights = summary_data.get("insights", [])
     except Exception as exc:
@@ -46,7 +48,7 @@ async def process_video(request: ProcessRequest):
     last_error = "Unknown error"
     for attempt in range(MAX_QUIZ_RETRIES + 1):
         try:
-            raw_quiz = claude_service.get_quiz(transcript)
+            raw_quiz = claude_service.get_quiz(plain_transcript)
             is_valid, error_msg = validator.validate_quiz(raw_quiz)
             if is_valid:
                 quiz_data = raw_quiz
@@ -67,7 +69,7 @@ async def process_video(request: ProcessRequest):
     return ProcessResponse(
         video_id=video_id,
         title=title,
-        transcript=transcript,
+        transcript=segments,
         summary=summary,
         insights=insights,
         quiz=quiz_items,

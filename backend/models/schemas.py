@@ -13,10 +13,15 @@ class QuizItem(BaseModel):
     answer: str              # "A" | "B" | "C" | "D"
 
 
+class TranscriptSegment(BaseModel):
+    time: str  # "MM:SS" or "HH:MM:SS"
+    text: str
+
+
 class ProcessResponse(BaseModel):
     video_id: str
     title: str
-    transcript: str
+    transcript: List[TranscriptSegment]
     summary: str
     insights: List[str]
     quiz: List[QuizItem]

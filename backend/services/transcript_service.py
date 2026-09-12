@@ -49,9 +49,63 @@ def get_video_title(video_id: str) -> str:
     return video_id
 
 
-def get_transcript(video_id: str) -> str:
+def _format_timestamp(offset_ms: float) -> str:
+    total_seconds = int(offset_ms // 1000)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def _merge_into_lines(chunks: list, gap_threshold_ms: int = 2000, max_line_chars: int = 200) -> list:
     """
-    Fetch English transcript via Supadata API.
+    Auto-generated captions arrive as many small, sometimes overlapping
+    fragments. Sort them by their real start time and glue nearby fragments
+    into one readable line per timestamp, instead of a timestamp per fragment.
+    """
+    ordered = sorted(chunks, key=lambda c: c.get("offset", 0))
+
+    lines = []
+    current_text = []
+    current_start = None
+    last_end = None
+
+    for chunk in ordered:
+        text = (chunk.get("text") or "").strip()
+        if not text:
+            continue
+        start = chunk.get("offset", 0)
+        end = start + chunk.get("duration", 0)
+
+        starts_new_line = (
+            current_start is None
+            or start - last_end > gap_threshold_ms
+            or sum(len(t) for t in current_text) > max_line_chars
+        )
+
+        if starts_new_line:
+            if current_text:
+                lines.append({"start_ms": current_start, "text": " ".join(current_text)})
+            current_text = [text]
+            current_start = start
+        else:
+            current_text.append(text)
+
+        last_end = max(last_end or 0, end)
+
+    if current_text:
+        lines.append({"start_ms": current_start, "text": " ".join(current_text)})
+
+    return lines
+
+
+def get_transcript(video_id: str) -> dict:
+    """
+    Fetch the English transcript via Supadata API and organize it into
+    time-ordered, merged lines instead of raw overlapping caption fragments.
+
+    Returns {"plain_text": str, "segments": [{"time": "MM:SS", "text": str}, ...]}.
     Raises ValueError if no transcript is available.
     """
     api_key = os.environ.get("SUPADATA_API_KEY")
@@ -61,7 +115,7 @@ def get_transcript(video_id: str) -> str:
     resp = requests.get(
         SUPADATA_API_URL,
         headers={"x-api-key": api_key},
-        params={"videoId": video_id, "lang": "en", "text": "true"},
+        params={"videoId": video_id, "lang": "en", "text": "false"},
         timeout=30,
     )
 
@@ -71,15 +125,22 @@ def get_transcript(video_id: str) -> str:
         raise ValueError(f"Supadata API error: {resp.status_code} {resp.text[:200]}")
 
     data = resp.json()
-    text = data.get("content", "")
+    chunks = data.get("content", [])
 
-    if not isinstance(text, str):
-        raise ValueError("Unexpected response format from Supadata API")
-
-    if not text.strip():
+    if not isinstance(chunks, list) or not chunks:
         raise ValueError("Transcript is empty")
 
-    if len(text) > MAX_TRANSCRIPT_CHARS:
-        text = text[:MAX_TRANSCRIPT_CHARS] + "\n\n[Transcript truncated due to length]"
+    lines = _merge_into_lines(chunks)
+    if not lines:
+        raise ValueError("Transcript is empty")
 
-    return text
+    segments = [
+        {"time": _format_timestamp(line["start_ms"]), "text": line["text"]}
+        for line in lines
+    ]
+
+    plain_text = "\n".join(f"[{seg['time']}] {seg['text']}" for seg in segments)
+    if len(plain_text) > MAX_TRANSCRIPT_CHARS:
+        plain_text = plain_text[:MAX_TRANSCRIPT_CHARS] + "\n\n[Transcript truncated due to length]"
+
+    return {"plain_text": plain_text, "segments": segments}

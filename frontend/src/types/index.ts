@@ -12,10 +12,15 @@ export interface QuizItem {
   answer: string;
 }
 
+export interface TranscriptSegment {
+  time: string;
+  text: string;
+}
+
 export interface ProcessResponse {
   video_id: string;
   title: string;
-  transcript: string;
+  transcript: TranscriptSegment[];
   summary: string;
   insights: string[];
   quiz: QuizItem[];

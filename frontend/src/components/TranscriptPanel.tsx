@@ -1,11 +1,20 @@
+import { TranscriptSegment } from '../types'
+
 interface Props {
-  transcript: string;
+  transcript: TranscriptSegment[];
 }
 
 export default function TranscriptPanel({ transcript }: Props) {
   return (
     <div className="tab-panel">
-      <pre className="transcript-text">{transcript}</pre>
+      <div className="transcript-list">
+        {transcript.map((segment, i) => (
+          <div className="transcript-line" key={i}>
+            <span className="transcript-time">{segment.time}</span>
+            <span className="transcript-line-text">{segment.text}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
