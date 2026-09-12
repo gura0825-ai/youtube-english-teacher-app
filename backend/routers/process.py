@@ -74,3 +74,4 @@ async def process_video(request: ProcessRequest):
         insights=insights,
         quiz=quiz_items,
     )
+
