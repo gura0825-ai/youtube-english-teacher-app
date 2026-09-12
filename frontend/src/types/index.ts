@@ -27,3 +27,4 @@ export interface ProcessResponse {
 }
 
 export type AppPhase = 'idle' | 'loading' | 'done' | 'error';
+
