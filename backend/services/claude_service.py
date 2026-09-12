@@ -50,10 +50,14 @@ Requirements:
 - Summary: 3–5 paragraphs in English
 - Insights: 3–5 bullet items, each a single concise sentence in English"""
 
-    response = _get_client().models.generate_content(model=MODEL, contents=prompt)
+    response = _get_client().models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config={"response_mime_type": "application/json"},
+    )
     raw = response.text
-    # strict=False: Gemini's freeform JSON output often contains literal
-    # unescaped newlines inside string values, which strict JSON rejects.
+    # strict=False: even in JSON mode Gemini can emit literal unescaped
+    # control characters inside string values, which strict JSON rejects.
     return json.loads(_extract_json(raw), strict=False)
 
 
@@ -92,9 +96,13 @@ Requirements:
 - Three plausible but incorrect distractors grounded in the transcript context
 - Vary difficulty: comprehension, inference, vocabulary, main idea"""
 
-    response = _get_client().models.generate_content(model=MODEL, contents=prompt)
+    response = _get_client().models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config={"response_mime_type": "application/json"},
+    )
     raw = response.text
-    # strict=False: Gemini's freeform JSON output often contains literal
-    # unescaped newlines inside string values, which strict JSON rejects.
+    # strict=False: even in JSON mode Gemini can emit literal unescaped
+    # control characters inside string values, which strict JSON rejects.
     return json.loads(_extract_json(raw), strict=False)
 
