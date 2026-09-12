@@ -18,3 +18,4 @@ export default function TranscriptPanel({ transcript }: Props) {
     </div>
   )
 }
+
